@@ -1,44 +1,60 @@
 #!/bin/bash
+#==============================================================================
+# Tempo Node - GoldVPS Edition
+# https://github.com/GoldVPS/tempo-node
+# Powered by GoldVPS Team
+#==============================================================================
+
 set -e
 
-# Root check
+echo "╔════════════════════════════════════════╗"
+echo "║               TEMPO NODE               ║"
+echo "╚════════════════════════════════════════╝"
+echo ""
+
+# Check root
 if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash setup.sh"
-  exit 1
+    echo "⚠️  Run as root: sudo bash setup.sh"
+    exit 1
 fi
 
 TEMPO_DIR="$HOME/.tempo"
 
-echo "🟡 GoldVPS | Tempo Node Setup"
-
-# Docker
-if ! command -v docker &>/dev/null; then
-  curl -fsSL https://get.docker.com | sh
-  systemctl enable docker
-  systemctl start docker
+echo "[1/7] Installing Docker..."
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
+    systemctl enable docker
+    systemctl start docker
+    echo "✅ Docker installed"
+else
+    echo "✅ Docker already installed"
 fi
 
-# Dependencies
+echo "[2/7] Installing dependencies..."
 apt update -qq
 apt install -y curl jq ufw -qq
+echo "✅ Dependencies installed"
 
-# Firewall
-echo "Configuring UFW..."
+echo "[3/7] Configuring Firewall (UFW)..."
+ufw --force enable
 ufw allow 22/tcp
 ufw allow 8547/tcp
 ufw allow 8548/tcp
 ufw allow 30304/tcp
-ufw --force enable
+echo "✅ Firewall configured"
 
-# Directory
-mkdir -p "$TEMPO_DIR"/{data,logs,config}
+echo "[4/7] Creating directory..."
+mkdir -p "$TEMPO_DIR"
 cd "$TEMPO_DIR"
+echo "✅ Directory created: $TEMPO_DIR"
 
-# Pull image
+echo "[5/7] Pulling Tempo Docker image..."
 docker pull ghcr.io/tempoxyz/tempo:latest
+echo "✅ Image pulled"
 
-# .env.example
-cat > .env.example <<EOF
+echo "[6/7] Creating config files..."
+
+cat > .env.example <<'EOF'
 CONSENSUS_SIGNING_KEY=your_64_character_private_key_here
 CONSENSUS_FEE_RECIPIENT=0xYourWalletAddressHere
 TEMPO_HTTP_PORT=8547
@@ -47,17 +63,36 @@ TEMPO_P2P_PORT=30304
 RUST_LOG=info
 EOF
 
-# start.sh
+cat > .gitignore <<'EOF'
+.env
+config/signing-key.txt
+data/
+logs/
+config/
+*.bak
+EOF
+
+mkdir -p data logs config
+
+echo "[7/7] Creating helper scripts..."
+
+# ==== START.SH ====
 cat > start.sh <<'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
-source .env || { echo ".env not found"; exit 1; }
 
+if [ ! -f .env ]; then
+  echo "❌ .env not found"
+  exit 1
+fi
+
+source .env
 CLEAN_KEY="${CONSENSUS_SIGNING_KEY#0x}"
-echo "$CLEAN_KEY" > config/signing-key.txt
 
 docker stop tempo-node 2>/dev/null
 docker rm tempo-node 2>/dev/null
+
+printf "%s" "$CLEAN_KEY" > config/signing-key.txt
 
 docker run -d \
   --name tempo-node \
@@ -71,16 +106,17 @@ docker run -d \
   ghcr.io/tempoxyz/tempo:latest \
   node \
   --datadir /data \
+  --follow \
   --http --http.addr 0.0.0.0 --http.port 8545 \
   --ws --ws.addr 0.0.0.0 --ws.port 8546 \
   --port 30303 \
   --consensus.signing-key /config/signing-key.txt \
   --consensus.fee-recipient "$CONSENSUS_FEE_RECIPIENT"
 
-echo "✅ Node started"
+echo "✅ Tempo node started"
 EOF
 
-# stop.sh
+# ==== STOP.SH ====
 cat > stop.sh <<'EOF'
 #!/bin/bash
 docker stop tempo-node 2>/dev/null
@@ -88,7 +124,7 @@ docker rm tempo-node 2>/dev/null
 echo "✅ Node stopped"
 EOF
 
-# restart.sh
+# ==== RESTART.SH ====
 cat > restart.sh <<'EOF'
 #!/bin/bash
 ./stop.sh
@@ -96,43 +132,43 @@ sleep 2
 ./start.sh
 EOF
 
-# logs.sh
+# ==== LOGS.SH ====
 cat > logs.sh <<'EOF'
 #!/bin/bash
 docker logs -f tempo-node
 EOF
 
-# status.sh
+# ==== STATUS.SH ====
 cat > status.sh <<'EOF'
 #!/bin/bash
 docker ps --filter name=tempo-node
 docker stats tempo-node --no-stream
 EOF
 
-# test-rpc.sh
+# ==== TEST-RPC.SH ====
 cat > test-rpc.sh <<'EOF'
 #!/bin/bash
-curl -s -X POST http://localhost:8547 \
+RPC="http://localhost:8547"
+curl -s -X POST $RPC \
 -H "Content-Type: application/json" \
 -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq .
 EOF
 
-# update.sh
+# ==== UPDATE.SH ====
 cat > update.sh <<'EOF'
 #!/bin/bash
 docker pull ghcr.io/tempoxyz/tempo:latest
 ./restart.sh
 EOF
 
-# clean.sh
+# ==== CLEAN.SH ====
 cat > clean.sh <<'EOF'
 #!/bin/bash
-docker stop tempo-node 2>/dev/null
-docker rm tempo-node 2>/dev/null
+./stop.sh
 rm -rf data logs config/signing-key.txt
-echo "❌ All data removed"
+echo "✅ All data removed"
 EOF
 
 chmod +x *.sh
 
-echo "✅ Setup complete. Run ./menu.sh"
+echo "✅ Setup complete"
