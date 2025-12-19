@@ -1,9 +1,6 @@
 #!/bin/bash
 # GoldVPS Tempo CLI (wrapper only)
-# Swap policy:
-# - If RAM < 8GB -> create 10GB swap (when no swap active)
-# - If RAM >= 8GB -> do nothing
-# Does NOT modify setup.sh / engine
+# Swap & Port helper sebelum memanggil setup.sh (tidak mengubah setup.sh)
 
 set -e
 
@@ -47,7 +44,6 @@ confirm() {
 ensure_swap_for_small_vps() {
   echo -e "${CYAN}Checking RAM and swap status...${RESET}"
 
-  # get total memory in KB -> MB
   if ! mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}' 2>/dev/null); then
     echo -e "${YELLOW}Cannot read /proc/meminfo. Skipping swap check.${RESET}"
     return 1
@@ -108,6 +104,66 @@ ensure_swap_for_small_vps() {
   return 0
 }
 
+# Ensure ufw installed & enabled, and open required ports (no duplicates)
+ensure_ports() {
+  echo -e "${CYAN}Ensuring firewall (ufw) and ports...${RESET}"
+
+  # Determine ports (read from .env if exists)
+  DEFAULT_HTTP=8547
+  DEFAULT_WS=8548
+  DEFAULT_P2P=30304
+
+  if [ -f "$TEMPO_DIR/.env" ]; then
+    # shellcheck disable=SC1090
+    source "$TEMPO_DIR/.env" 2>/dev/null || true
+  fi
+
+  HTTP_PORT=${TEMPO_HTTP_PORT:-$DEFAULT_HTTP}
+  WS_PORT=${TEMPO_WS_PORT:-$DEFAULT_WS}
+  P2P_PORT=${TEMPO_P2P_PORT:-$DEFAULT_P2P}
+
+  echo "Ports to allow: SSH(22), HTTP RPC(${HTTP_PORT}), WS(${WS_PORT}), P2P(${P2P_PORT})"
+
+  # install ufw if missing
+  if ! command -v ufw >/dev/null 2>&1; then
+    echo -e "${YELLOW}ufw not found. Installing ufw...${RESET}"
+    sudo apt-get update -qq
+    sudo apt-get install -y ufw >/dev/null 2>&1 || {
+      echo -e "${RED}Failed to install ufw. Skipping port open.${RESET}"
+      return 1
+    }
+  fi
+
+  # enable ufw if inactive
+  ufw_status=$(sudo ufw status verbose 2>/dev/null || true)
+  if echo "$ufw_status" | grep -qi "Status: inactive"; then
+    echo -e "${YELLOW}Enabling ufw...${RESET}"
+    sudo ufw --force enable >/dev/null 2>&1 || {
+      echo -e "${RED}Failed to enable ufw. Continue anyway.${RESET}"
+    }
+  fi
+
+  # helper to add rule if not exists
+  add_rule_if_missing() {
+    local rule="$1"
+    # ufw status numbered or verbose; check simply if rule exists
+    if sudo ufw status | grep -E -q "$rule"; then
+      echo -e "${GREEN}Rule exists: $rule${RESET}"
+    else
+      echo -e "${YELLOW}Adding ufw rule: $rule${RESET}"
+      sudo ufw allow "$rule" >/dev/null 2>&1 || echo -e "${RED}Failed to add rule: $rule${RESET}"
+    fi
+  }
+
+  add_rule_if_missing "22/tcp"
+  add_rule_if_missing "${HTTP_PORT}/tcp"
+  add_rule_if_missing "${WS_PORT}/tcp"
+  add_rule_if_missing "${P2P_PORT}/tcp"
+
+  echo -e "${GREEN}✅ Firewall rules ensured.${RESET}"
+  sudo ufw status verbose | sed 's/^/  /'
+}
+
 # Ensure tempo dir exists for options that write .env
 mkdir -p "$TEMPO_DIR"
 
@@ -131,8 +187,10 @@ while true; do
     1)
       echo
       echo -e "${CYAN}Step 1: swap check & create (if VPS RAM < 8GB)${RESET}"
-      # try to create/enable swap (will skip if not needed)
       ensure_swap_for_small_vps || echo -e "${YELLOW}Continuing without swap.${RESET}"
+      echo
+      echo -e "${CYAN}Step 2: ensure ports (ufw)...${RESET}"
+      ensure_ports || echo -e "${YELLOW}Continuing without ufw/port changes.${RESET}"
       echo
       echo -e "${CYAN}Launching setup.sh (this will ask for root)...${RESET}"
       sudo bash setup.sh
