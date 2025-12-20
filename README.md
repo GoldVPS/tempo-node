@@ -1,5 +1,5 @@
 # 🚀 Tempo Node (Testnet) — Docker Setup
-Ubuntu 20.04+ — Simple CLI Installer (GoldVPS Edition)
+Ubuntu 22.04+ — Simple CLI Installer (GoldVPS Edition)
 
 ---
 
