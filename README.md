@@ -36,7 +36,7 @@ Need a reliable VPS for running Tempo Node?
 - ✅ NVMe SSD
 - ✅ Suitable for testnet & node operations
 
-## 👉 Order: https://goldvps.net  
+### 👉 Order: https://goldvps.net  
 📩 Telegram: https://t.me/miftaikyy
 
 ---
