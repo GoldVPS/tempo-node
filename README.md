@@ -20,7 +20,7 @@ This repository provides a **simple CLI wrapper** for running an official **Temp
 | Storage | 250 GB SSD | 512 GB SSD |
 
 
-> VPS with less than 8 GB RAM is supported.
+> VPS with 8 GB RAM is supported.
 > The menu will **automatically create a 10 GB swap file** if needed.
 
 ---
